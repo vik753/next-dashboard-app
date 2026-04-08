@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { signIn } from "@/auth";
 import { AuthError } from "next-auth";
+import bcrypt from "bcrypt";
 
 const sql = postgres(process.env.POSTGRES_URL!, { ssl: "require" });
 
@@ -142,3 +143,72 @@ export async function authenticate(
     throw error;
   }
 }
+
+// ─── Sign Up ────────────────────────────────────────────────────────────────
+
+const SignUpSchema = z.object({
+  email: z.string().email({ message: "Please enter a valid email address." }),
+  password: z
+    .string()
+    .min(6, { message: "Password must be at least 6 characters." }),
+});
+
+export type SignUpState = {
+  errors?: {
+    email?: string[];
+    password?: string[];
+  };
+  message?: string | null;
+};
+
+export async function registerUser(
+  prevState: SignUpState,
+  formData: FormData,
+): Promise<SignUpState> {
+  const validatedFields = SignUpSchema.safeParse({
+    email: formData.get("email"),
+    password: formData.get("password"),
+  });
+
+  if (!validatedFields.success) {
+    return {
+      errors: validatedFields.error.flatten().fieldErrors,
+      message: "Invalid fields. Failed to create account.",
+    };
+  }
+
+  const { email, password } = validatedFields.data;
+
+  // Check for duplicate email
+  try {
+    const existing = await sql<{ id: string }[]>`
+      SELECT id FROM users WHERE email = ${email} LIMIT 1
+    `;
+    if (existing.length > 0) {
+      return {
+        errors: { email: ["This email is already registered."] },
+        message: "Failed to create account.",
+      };
+    }
+  } catch {
+    return { message: "Database Error: Failed to check existing user." };
+  }
+
+  // Hash password and insert new user (name defaults to email)
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    await sql`
+      INSERT INTO users (id, name, email, password)
+      VALUES (uuid_generate_v4(), ${email}, ${email}, ${hashedPassword})
+    `;
+  } catch {
+    return { message: "Database Error: Failed to create account." };
+  }
+
+  // Auto sign-in after successful registration (throws NEXT_REDIRECT on success)
+  await signIn("credentials", { email, password, redirectTo: "/dashboard" });
+
+  // Unreachable — signIn always redirects or throws
+  return { message: null };
+}
+
