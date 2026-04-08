@@ -1,5 +1,62 @@
 # AGENTS.md — Next.js Dashboard Codebase Guide
 
+## Multi-Agent Orchestration
+
+### Agents & Roles
+| Agent | Instruction file | Responsibility |
+|---|---|---|
+| **OrchestratorAgent** (main) | *(this file + `.github/copilot-instructions.md`)* | Decomposes user request → plan → delegates |
+| **DeveloperAgent** | `.github/agents/developer.md` | Writes / edits source code |
+| **QA-Agent** | `.github/agents/qa.md` | Writes & runs Vitest + Playwright tests |
+| **ReviewerAgent** | `.github/agents/reviewer.md` | Reviews diffs for security, types, architecture |
+| **DocsAgent** | `.github/agents/docs.md` | Keeps `AGENTS.md`, `README.md`, JSDoc in sync |
+
+### Orchestration Protocol (Handoff Format)
+The Orchestrator MUST pass this block when delegating to any sub-agent:
+
+```
+AGENT: <DeveloperAgent | QA-Agent | ReviewerAgent | DocsAgent>
+TASK: <one-sentence description>
+FILES_TO_EDIT: <paths, or "none">
+FILES_TO_CREATE: <paths, or "none">
+CONTEXT_FILES: <paths the agent must read first>
+CONSTRAINTS: <project-specific rules relevant to this task>
+ACCEPTANCE_CRITERIA:
+  - <measurable criterion>
+```
+
+### Execution Cycle
+```
+User request
+    │
+    ▼
+OrchestratorAgent — writes step-by-step plan
+    │  (user approves)
+    ▼
+DeveloperAgent — implements, runs build + lint
+    │
+    ▼
+QA-Agent — writes tests, all must pass
+    │
+    ▼
+ReviewerAgent — reviews diff + QA report
+    │  (APPROVED or APPROVED_WITH_NOTES)
+    ▼
+DocsAgent — updates AGENTS.md / README / JSDoc
+    │
+    ▼
+OrchestratorAgent — reports completion to user
+```
+
+### Context Isolation Rules
+- Each sub-agent starts a **fresh chat session** with only its role file + shared
+  `.github/copilot-instructions.md` as system context.
+- The Orchestrator passes **only the files listed** in `CONTEXT_FILES` — never the
+  full codebase.
+- Sub-agents must **never** read files not listed in the handoff block.
+
+---
+
 ## Stack
 Next.js App Router · TypeScript · Tailwind CSS · `postgres` (raw SQL, no ORM) · NextAuth.js v5 (beta) · Zod · pnpm
 
